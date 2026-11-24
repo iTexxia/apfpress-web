@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
 function catalogueItem() {
     return {
@@ -55,7 +55,7 @@ async function installApiFixtures(page: Page): Promise<void> {
     });
 }
 
-test('catalogue editor keeps save and validation feedback in reach', async ({ page }) => {
+test('catalogue editor keeps save and validation feedback in reach', async ({ page }, testInfo: TestInfo) => {
     const dateWarnings: string[] = [];
     page.on('console', (message) => {
         if (message.type() === 'warning' && /yyyy-MM-dd|required format|does not conform/i.test(message.text())) dateWarnings.push(message.text());
@@ -66,6 +66,13 @@ test('catalogue editor keeps save and validation feedback in reach', async ({ pa
     await page.getByLabel('Password').fill('ChangeMe!12345');
     await page.getByRole('button', { name: /Sign in/i }).click();
     await expect(page).toHaveURL(/\/admin/);
+
+    await page.locator('[data-section="import"]').click();
+    const importTitle = page.getByRole('heading', { level: 1, name: 'WooCommerce import' });
+    await expect(importTitle).toBeVisible();
+    const titleSize = await importTitle.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
+    const titleMaximums = { desktop: 56, 'tablet-landscape': 46, tablet: 42, mobile: 38, 'mobile-small': 36 } as const;
+    expect(titleSize).toBeLessThanOrEqual(titleMaximums[testInfo.project.name as keyof typeof titleMaximums]);
 
     await page.locator('[data-section="catalog"]').click();
     await expect(page.getByText('1 catalogue records')).toBeVisible();
