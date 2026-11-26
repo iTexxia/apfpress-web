@@ -27,10 +27,10 @@
             <form action="{{ route('contact.store') }}" method="post">@csrf
                 <div class="field honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
                 <div class="form-grid">
-                    <div class="field"><label for="name">Your name <span>Required</span></label><input class="input" id="name" name="name" value="{{ old('name') }}" autocomplete="name" required></div>
-                    <div class="field"><label for="email">Email <span>Required</span></label><input class="input" id="email" name="email" type="email" value="{{ old('email') }}" autocomplete="email" required></div>
-                    <div class="field field-full"><label for="subject">Subject <span>Required</span></label><input class="input" id="subject" name="subject" value="{{ old('subject', request('subject')) }}" required></div>
-                    <div class="field field-full"><label for="message">Your message <span>Required</span></label><textarea class="textarea" id="message" name="message" required>{{ old('message') }}</textarea></div>
+                    <div class="field @error('name') field-invalid @enderror"><label for="name">Your name <span>Required</span></label><input class="input" id="name" name="name" value="{{ old('name') }}" autocomplete="name" required @error('name') aria-invalid="true" aria-describedby="name-error" @enderror>@error('name')<p id="name-error" class="error">{{ $message }}</p>@enderror</div>
+                    <div class="field @error('email') field-invalid @enderror"><label for="email">Email <span>Required</span></label><input class="input" id="email" name="email" type="email" value="{{ old('email') }}" autocomplete="email" required @error('email') aria-invalid="true" aria-describedby="email-error" @enderror>@error('email')<p id="email-error" class="error">{{ $message }}</p>@enderror</div>
+                    <div class="field field-full @error('subject') field-invalid @enderror"><label for="subject">Subject <span>Required</span></label><input class="input" id="subject" name="subject" value="{{ old('subject', request('subject')) }}" required @error('subject') aria-invalid="true" aria-describedby="subject-error" @enderror>@error('subject')<p id="subject-error" class="error">{{ $message }}</p>@enderror</div>
+                    <div class="field field-full @error('message') field-invalid @enderror"><label for="message">Your message <span>Required</span></label><textarea class="textarea" id="message" name="message" required @error('message') aria-invalid="true" aria-describedby="message-error" @enderror>{{ old('message') }}</textarea>@error('message')<p id="message-error" class="error">{{ $message }}</p>@enderror</div>
                 </div>
                 <button class="button form-submit" type="submit">Send your message <span aria-hidden="true">→</span></button>
             </form>

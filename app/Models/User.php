@@ -35,7 +35,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function isStaff(): bool
     {
-        return in_array($this->role, ['owner', 'editor', 'fulfillment'], true);
+        return in_array($this->role, ['owner', 'editor', 'catalog_manager', 'fulfillment'], true);
     }
 
     public function hasRole(string ...$roles): bool

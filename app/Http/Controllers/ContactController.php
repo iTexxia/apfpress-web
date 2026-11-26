@@ -2,9 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ContactInquiry;
+use App\Models\SiteSetting;
+use App\Notifications\ContactInquiryNotification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
+use Throwable;
 
 class ContactController extends Controller
 {
@@ -19,8 +24,20 @@ class ContactController extends Controller
         ]);
         unset($data['website']);
 
-        DB::table('contact_inquiries')->insert($data + ['status' => 'new', 'created_at' => now(), 'updated_at' => now()]);
+        $recipient = SiteSetting::contactRecipient();
+        $inquiry = ContactInquiry::query()->create($data + [
+            'status' => 'new',
+            'notification_recipient' => $recipient,
+        ]);
 
-        return back()->with('success', 'Thank you. Your message has been sent to our editorial team.');
+        try {
+            Notification::route('mail', $recipient)->notifyNow(new ContactInquiryNotification($inquiry));
+            $inquiry->update(['notified_at' => now(), 'notification_error' => null]);
+        } catch (Throwable $exception) {
+            $inquiry->update(['notification_error' => Str::limit($exception->getMessage(), 2000)]);
+            report($exception);
+        }
+
+        return back()->with('success', 'Thank you. Your message has been received by our editorial team.');
     }
 }

@@ -24,7 +24,7 @@ describe('AdminApp', () => {
         expect(html).toContain('Catalogue titles');
         expect(html).toContain('Paid revenue');
 
-        for (const section of ['dashboard', 'catalog', 'import', 'orders', 'integrations', 'settings']) {
+        for (const section of ['dashboard', 'catalog', 'import', 'orders', 'integrations', 'settings', 'contact', 'users']) {
             expect(html).toContain(`data-section="${section}"`);
         }
     });
@@ -38,6 +38,8 @@ describe('AdminApp', () => {
         expect(html).not.toContain('data-section="orders"');
         expect(html).not.toContain('data-section="integrations"');
         expect(html).not.toContain('data-section="settings"');
+        expect(html).not.toContain('data-section="contact"');
+        expect(html).not.toContain('data-section="users"');
     });
 
     it('gives fulfilment staff access to overview and orders only', async () => {
@@ -49,5 +51,16 @@ describe('AdminApp', () => {
         expect(html).not.toContain('data-section="import"');
         expect(html).not.toContain('data-section="integrations"');
         expect(html).not.toContain('data-section="settings"');
+        expect(html).not.toContain('data-section="contact"');
+        expect(html).not.toContain('data-section="users"');
+    });
+
+    it('limits catalogue managers to product management only', async () => {
+        const html = await renderAdmin('catalog_manager');
+
+        expect(html).toContain('data-section="catalog"');
+        for (const section of ['dashboard', 'import', 'orders', 'integrations', 'settings', 'contact', 'users']) {
+            expect(html).not.toContain(`data-section="${section}"`);
+        }
     });
 });

@@ -7,6 +7,7 @@ use App\Models\Payment;
 use App\Services\CartService;
 use App\Services\OrderService;
 use App\Services\PaymentFinalizer;
+use App\Services\PaymentConfiguration;
 use App\Services\PaymentManager;
 use App\Services\QuoteService;
 use Illuminate\Http\JsonResponse;
@@ -18,14 +19,18 @@ use Throwable;
 
 class CheckoutController extends Controller
 {
-    public function index(Request $request, CartService $carts, QuoteService $quotes): View|RedirectResponse
+    public function index(Request $request, CartService $carts, QuoteService $quotes, PaymentConfiguration $payments): View|RedirectResponse
     {
         $cart = $carts->current($request);
         if ($cart->items()->doesntExist()) {
             return redirect()->route('catalog.index')->withErrors(['cart' => 'Your cart is empty.']);
         }
 
-        return view('checkout.index', ['cart' => $carts->present($cart), 'quote' => $quotes->quote($cart, 'CA', 'ON')]);
+        return view('checkout.index', [
+            'cart' => $carts->present($cart),
+            'quote' => $quotes->quote($cart, 'CA', 'ON'),
+            'paymentProviders' => $payments->availableProviders(),
+        ]);
     }
 
     public function quote(Request $request, CartService $carts, QuoteService $quotes): JsonResponse
@@ -35,10 +40,10 @@ class CheckoutController extends Controller
         return response()->json($quotes->quote($carts->current($request), $data['country'], $data['region'] ?? null));
     }
 
-    public function store(Request $request, CartService $carts, QuoteService $quotes, OrderService $orders, PaymentManager $payments, PaymentFinalizer $finalizer): RedirectResponse
+    public function store(Request $request, CartService $carts, QuoteService $quotes, OrderService $orders, PaymentConfiguration $configuration, PaymentManager $payments, PaymentFinalizer $finalizer): RedirectResponse
     {
         $data = $request->validate([
-            'provider' => ['required', Rule::in(['stripe', 'paypal'])],
+            'provider' => ['required', Rule::in($configuration->availableProviders())],
             'name' => ['required', 'string', 'max:120'], 'company' => ['nullable', 'string', 'max:120'],
             'line_1' => ['required', 'string', 'max:160'], 'line_2' => ['nullable', 'string', 'max:160'],
             'city' => ['required', 'string', 'max:120'], 'region' => ['required', 'string', 'max:100'],
