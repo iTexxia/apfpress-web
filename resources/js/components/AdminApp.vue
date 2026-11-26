@@ -3,11 +3,11 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { money } from '../lib/http';
 import CatalogueManager from './admin/CatalogueManager.vue';
 
-type Section = 'dashboard' | 'catalog' | 'import' | 'orders' | 'integrations' | 'settings';
+type Section = 'dashboard' | 'catalog' | 'import' | 'orders' | 'integrations' | 'settings' | 'contact' | 'users';
 type NavigationItem = { id: Section; index: string; label: string; hint: string; visible: boolean };
 
 const props = defineProps<{ user: { name: string; email: string; role: string } }>();
-const section = ref<Section>('dashboard');
+const section = ref<Section>(props.user.role === 'catalog_manager' ? 'catalog' : 'dashboard');
 const loading = ref(false);
 const error = ref('');
 const notice = ref('');
@@ -15,6 +15,9 @@ const dashboard = ref<Record<string, number>>({});
 const orders = ref<any[]>([]);
 const integrations = ref<any[]>([]);
 const settings = ref<any>({ shipping_zones: [], tax_rules: [] });
+const contactSettings = reactive({ recipient_email: '', default_recipient_email: '', from_email: '' });
+const staffUsers = ref<any[]>([]);
+const staffForm = reactive({ name: '', email: '', role: 'catalog_manager', password: '', password_confirmation: '' });
 const importPreview = ref<any | null>(null);
 const upload = ref<File | null>(null);
 const catalogueManager = ref<{ confirmLeave: () => boolean } | null>(null);
@@ -22,18 +25,21 @@ const integrationForms = reactive<Record<string, any>>({
     stripe: { environment: 'sandbox', enabled: false, credentials: { secret: '', webhook_secret: '' } },
     paypal: { environment: 'sandbox', enabled: false, credentials: { client_id: '', client_secret: '', webhook_id: '' } },
 });
-const canEdit = computed(() => ['owner', 'editor'].includes(props.user.role));
+const canEdit = computed(() => ['owner', 'editor', 'catalog_manager'].includes(props.user.role));
+const canImport = computed(() => ['owner', 'editor'].includes(props.user.role));
 const canFulfil = computed(() => ['owner', 'fulfillment'].includes(props.user.role));
 const initials = computed(() => props.user.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'AP');
 const roleLabel = computed(() => props.user.role.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()));
 const navigation = computed<NavigationItem[]>(() => {
     const items: NavigationItem[] = [
-        { id: 'dashboard', index: '01', label: 'Overview', hint: 'Publishing pulse', visible: true },
+        { id: 'dashboard', index: '01', label: 'Overview', hint: 'Publishing pulse', visible: props.user.role !== 'catalog_manager' },
         { id: 'catalog', index: '02', label: 'Catalogue', hint: 'Titles & editions', visible: canEdit.value },
-        { id: 'import', index: '03', label: 'Woo import', hint: 'Migration desk', visible: canEdit.value },
+        { id: 'import', index: '03', label: 'Woo import', hint: 'Migration desk', visible: canImport.value },
         { id: 'orders', index: '04', label: 'Orders', hint: 'Sales & fulfilment', visible: canFulfil.value },
         { id: 'integrations', index: '05', label: 'Payments', hint: 'Provider access', visible: props.user.role === 'owner' },
         { id: 'settings', index: '06', label: 'Shipping & tax', hint: 'Commerce rules', visible: props.user.role === 'owner' },
+        { id: 'contact', index: '07', label: 'Contact inbox', hint: 'Inquiry routing', visible: props.user.role === 'owner' },
+        { id: 'users', index: '08', label: 'Team access', hint: 'Roles & accounts', visible: props.user.role === 'owner' },
     ];
 
     return items.filter((item) => item.visible);
@@ -45,6 +51,8 @@ const sectionContent: Record<Section, { eyebrow: string; title: string; descript
     orders: { eyebrow: 'Reader services', title: 'Orders & fulfilment', description: 'Follow purchases from payment through delivery and digital access.' },
     integrations: { eyebrow: 'Commerce infrastructure', title: 'Payment providers', description: 'Manage encrypted checkout credentials and provider availability.' },
     settings: { eyebrow: 'Commerce policy', title: 'Shipping & tax', description: 'Review the rules that shape checkout across every supported region.' },
+    contact: { eyebrow: 'Reader communications', title: 'Contact inbox', description: 'Choose where website inquiries are delivered and keep routing transparent.' },
+    users: { eyebrow: 'Access control', title: 'Team access', description: 'Create focused staff accounts and keep operational responsibilities separate.' },
 };
 const currentSection = computed(() => sectionContent[section.value]);
 const token = typeof document === 'undefined' ? '' : document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '';
@@ -74,6 +82,8 @@ async function navigate(next: Section): Promise<void> {
             integrations.value.forEach((item) => Object.assign(integrationForms[item.provider], { environment: item.environment, enabled: item.enabled }));
         }
         if (next === 'settings') settings.value = await api('/admin/api/commerce-settings');
+        if (next === 'contact') Object.assign(contactSettings, await api('/admin/api/contact-settings'));
+        if (next === 'users') staffUsers.value = (await api('/admin/api/users')).data;
     } catch (caught) { error.value = caught instanceof Error ? caught.message : 'Unable to load this section.'; }
 }
 
@@ -90,8 +100,53 @@ async function commitImport(): Promise<void> {
 }
 
 async function saveIntegration(provider: string): Promise<void> {
-    try { await api(`/admin/api/integrations/${provider}`, { method: 'PUT', body: JSON.stringify(integrationForms[provider]) }); notice.value = `${provider} settings saved. Secrets are encrypted in the database.`; }
+    try {
+        const saved = await api(`/admin/api/integrations/${provider}`, { method: 'PUT', body: JSON.stringify(integrationForms[provider]) });
+        const index = integrations.value.findIndex((item) => item.provider === provider);
+        if (index >= 0) integrations.value[index] = saved; else integrations.value.push(saved);
+        notice.value = `${provider} settings saved. Secrets are encrypted in the database.`;
+    }
     catch (caught) { error.value = caught instanceof Error ? caught.message : 'Unable to save integration.'; }
+}
+
+function integrationStatus(provider: string): any {
+    return integrations.value.find((item) => item.provider === provider) ?? {};
+}
+
+function formatRole(value: string): string {
+    return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+async function createStaffUser(): Promise<void> {
+    try {
+        await api('/admin/api/users', { method: 'POST', body: JSON.stringify(staffForm) });
+        const createdEmail = staffForm.email;
+        Object.assign(staffForm, { name: '', email: '', role: 'catalog_manager', password: '', password_confirmation: '' });
+        await navigate('users');
+        notice.value = `${createdEmail} can now sign in with catalogue-only access.`;
+    } catch (caught) { error.value = caught instanceof Error ? caught.message : 'Unable to create the staff account.'; }
+}
+
+async function saveStaffUser(user: any): Promise<void> {
+    try {
+        const result = await api(`/admin/api/users/${user.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ role: user.role, status: user.status }),
+        });
+        const index = staffUsers.value.findIndex((entry) => entry.id === user.id);
+        if (index >= 0) staffUsers.value[index] = result.data;
+        notice.value = `${user.email} access was updated.`;
+    } catch (caught) { error.value = caught instanceof Error ? caught.message : 'Unable to update staff access.'; }
+}
+
+async function saveContactSettings(): Promise<void> {
+    try {
+        Object.assign(contactSettings, await api('/admin/api/contact-settings', {
+            method: 'PUT',
+            body: JSON.stringify({ recipient_email: contactSettings.recipient_email }),
+        }));
+        notice.value = `Contact inquiries will be delivered to ${contactSettings.recipient_email}.`;
+    } catch (caught) { error.value = caught instanceof Error ? caught.message : 'Unable to save contact routing.'; }
 }
 
 async function fulfil(order: any): Promise<void> {
@@ -99,7 +154,7 @@ async function fulfil(order: any): Promise<void> {
     catch (caught) { error.value = caught instanceof Error ? caught.message : 'Unable to update order.'; }
 }
 
-onMounted(() => navigate('dashboard'));
+onMounted(() => navigate(section.value));
 </script>
 
 <template>
@@ -196,8 +251,9 @@ onMounted(() => navigate('dashboard'));
 
                 <section v-if="section === 'integrations'" class="admin-two-col admin-integrations" data-admin-view="integrations">
                     <article v-for="provider in ['stripe', 'paypal']" :key="provider" class="admin-editor admin-provider-card">
-                        <div class="admin-provider-head"><span>{{ provider === 'stripe' ? 'ST' : 'PP' }}</span><div><p class="eyebrow">Payment provider</p><h2>{{ provider === 'stripe' ? 'Stripe' : 'PayPal' }}</h2></div><b :class="{ enabled: integrationForms[provider].enabled }">{{ integrationForms[provider].enabled ? 'Enabled' : 'Disabled' }}</b></div>
+                        <div class="admin-provider-head"><span>{{ provider === 'stripe' ? 'ST' : 'PP' }}</span><div><p class="eyebrow">Payment provider</p><h2>{{ provider === 'stripe' ? 'Stripe' : 'PayPal' }}</h2></div><b :class="{ enabled: integrationStatus(provider).ready }">{{ integrationStatus(provider).ready ? 'Ready' : integrationForms[provider].enabled ? 'Needs configuration' : 'Disabled' }}</b></div>
                         <p class="admin-provider-intro">Credentials are encrypted before storage. Leave a saved secret blank to preserve its current value.</p>
+                        <p v-if="integrationStatus(provider).missing_credentials?.length" class="alert alert-error">Required before activation: {{ integrationStatus(provider).missing_credentials.join(', ').replaceAll('_', ' ') }}.</p>
                         <div class="field"><label>Environment</label><select v-model="integrationForms[provider].environment" class="select"><option value="sandbox">Sandbox</option><option value="live">Live</option></select></div>
                         <label class="admin-check"><input v-model="integrationForms[provider].enabled" type="checkbox"><span><strong>Enable checkout</strong><small>Make this provider available to readers.</small></span></label>
                         <template v-if="provider === 'stripe'"><div class="field"><label>Secret key</label><input v-model="integrationForms.stripe.credentials.secret" class="input" type="password" placeholder="Leave blank to preserve saved value"></div><div class="field"><label>Webhook signing secret</label><input v-model="integrationForms.stripe.credentials.webhook_secret" class="input" type="password"></div></template>
@@ -209,6 +265,45 @@ onMounted(() => navigate('dashboard'));
                 <section v-if="section === 'settings'" class="admin-two-col admin-settings" data-admin-view="settings">
                     <article class="admin-editor"><div class="admin-panel-heading"><div><p class="eyebrow">Delivery policy</p><h2>Shipping zones</h2></div><span>{{ settings.shipping_zones.length }} zones</span></div><div v-for="zone in settings.shipping_zones" :key="zone.id" class="setting-row"><strong>{{ zone.name }}</strong><span>{{ zone.country }}</span><small v-for="rule in zone.rules" :key="rule.id">{{ rule.name }} · {{ money(rule.rate_amount) }} · Free over {{ money(rule.free_above_amount) }}</small></div><p class="help">Launch defaults ship to Canada and the United States. Rates can be changed through the settings API.</p></article>
                     <article class="admin-editor"><div class="admin-panel-heading"><div><p class="eyebrow">Collection policy</p><h2>Tax rules</h2></div><span>{{ settings.tax_rules.length }} rules</span></div><div v-if="!settings.tax_rules.length" class="admin-policy-note"><span>!</span><p>No tax nexus rules are enabled. Have APF Press’s tax adviser approve jurisdictions and rates before collecting tax.</p></div><div v-for="rule in settings.tax_rules" :key="rule.id" class="setting-row"><strong>{{ rule.label }} — {{ rule.region || rule.country }}</strong><span>{{ (rule.rate_basis_points / 100).toFixed(2) }}%</span><small>{{ rule.nexus_enabled ? 'Nexus enabled' : 'Nexus disabled' }}</small></div></article>
+                </section>
+
+                <section v-if="section === 'contact'" class="admin-two-col admin-settings" data-admin-view="contact">
+                    <article class="admin-editor">
+                        <div class="admin-panel-heading"><div><p class="eyebrow">Inquiry delivery</p><h2>Contact recipient</h2><p>Every valid website inquiry is stored in the database and emailed to this address.</p></div><span>Owner only</span></div>
+                        <form @submit.prevent="saveContactSettings">
+                            <div class="field"><label for="contact-recipient">Recipient email address</label><input id="contact-recipient" v-model.trim="contactSettings.recipient_email" class="input" type="email" autocomplete="email" required><p class="help">Visitors never see this routing address. Replies go directly to the visitor’s submitted email address.</p></div>
+                            <button class="button" type="submit" :disabled="loading">{{ loading ? 'Saving…' : 'Save contact routing' }}</button>
+                        </form>
+                    </article>
+                    <article class="admin-editor">
+                        <div class="admin-panel-heading"><div><p class="eyebrow">Delivery safeguards</p><h2>How messages are handled</h2></div><span>Database + email</span></div>
+                        <div class="setting-row"><strong>Current recipient</strong><span>{{ contactSettings.recipient_email }}</span><small>Change this address at any time without editing server configuration.</small></div>
+                        <div class="setting-row"><strong>Default recipient</strong><span>{{ contactSettings.default_recipient_email }}</span><small>Used until an owner saves a custom recipient.</small></div>
+                        <div class="setting-row"><strong>Sender address</strong><span>{{ contactSettings.from_email }}</span><small>The visitor’s address is assigned as Reply-To, protecting mail deliverability while keeping replies convenient.</small></div>
+                        <div class="admin-policy-note"><span>✓</span><p>If email delivery fails, the inquiry remains safely stored and the failure is recorded for diagnosis.</p></div>
+                    </article>
+                </section>
+
+                <section v-if="section === 'users'" class="admin-two-col admin-settings" data-admin-view="users">
+                    <article class="admin-editor">
+                        <div class="admin-panel-heading"><div><p class="eyebrow">New staff account</p><h2>Add a team member</h2><p>Use a focused role so each person only reaches the tools required for their work.</p></div><span>Owner only</span></div>
+                        <form @submit.prevent="createStaffUser">
+                            <div class="field"><label for="staff-name">Full name</label><input id="staff-name" v-model.trim="staffForm.name" class="input" autocomplete="name" required></div>
+                            <div class="field"><label for="staff-email">Email address</label><input id="staff-email" v-model.trim="staffForm.email" class="input" type="email" autocomplete="email" required></div>
+                            <div class="field"><label for="staff-role">Role</label><select id="staff-role" v-model="staffForm.role" class="select"><option value="catalog_manager">Catalogue manager — products only</option><option value="editor">Editor — catalogue and imports</option><option value="fulfillment">Fulfillment — orders only</option></select></div>
+                            <div class="field"><label for="staff-password">Temporary password</label><input id="staff-password" v-model="staffForm.password" class="input" type="password" autocomplete="new-password" minlength="12" required><p class="help">At least 12 characters with uppercase, lowercase, and a number.</p></div>
+                            <div class="field"><label for="staff-password-confirmation">Confirm temporary password</label><input id="staff-password-confirmation" v-model="staffForm.password_confirmation" class="input" type="password" autocomplete="new-password" minlength="12" required></div>
+                            <button class="button" type="submit" :disabled="loading">{{ loading ? 'Creating…' : 'Create staff account' }}</button>
+                        </form>
+                    </article>
+                    <article class="admin-editor">
+                        <div class="admin-panel-heading"><div><p class="eyebrow">Current team</p><h2>Roles and status</h2><p>Suspend access immediately when a team member no longer needs the workspace.</p></div><span>{{ staffUsers.length }} accounts</span></div>
+                        <div v-for="staff in staffUsers" :key="staff.id" class="setting-row">
+                            <strong>{{ staff.name }}</strong><span>{{ staff.email }}</span>
+                            <template v-if="staff.editable"><select v-model="staff.role" class="select" :aria-label="`Role for ${staff.name}`"><option value="catalog_manager">Catalogue manager</option><option value="editor">Editor</option><option value="fulfillment">Fulfillment</option></select><select v-model="staff.status" class="select" :aria-label="`Status for ${staff.name}`"><option value="active">Active</option><option value="suspended">Suspended</option></select><button class="button button-small" type="button" :disabled="loading" @click="saveStaffUser(staff)">Save access</button></template>
+                            <small v-else>{{ formatRole(staff.role) }} · protected owner account</small>
+                        </div>
+                    </article>
                 </section>
             </div>
         </main>

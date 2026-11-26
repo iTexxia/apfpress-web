@@ -17,7 +17,7 @@ class StripeGateway implements PaymentGateway
     public function createCheckout(Order $order, Payment $payment): array
     {
         $config = $this->configuration->get('stripe');
-        if (! $config['enabled'] || empty($config['secret'])) {
+        if (! $this->configuration->isReady('stripe')) {
             throw new RuntimeException('Stripe checkout is not configured.');
         }
 

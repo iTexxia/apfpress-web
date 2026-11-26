@@ -77,7 +77,7 @@ class PaypalGateway implements PaymentGateway
 
     private function accessToken(array $config): string
     {
-        if (! $config['enabled'] || empty($config['client_id']) || empty($config['client_secret'])) {
+        if (! $this->configuration->isReady('paypal')) {
             throw new RuntimeException('PayPal checkout is not configured.');
         }
 
